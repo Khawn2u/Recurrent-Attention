@@ -1,0 +1,141 @@
+<html>
+    <head>
+        <script src="./WebML.js"></script>
+    </head>
+    <body bgcolor="#808080">
+        Training Text Data File:<input type="file" id="text"><br>
+        Vocabulary File:<input type="file" id="vocab">
+        <div id="loss"></div>
+        <script>
+            // var Graph0 = new GraphHandler(document.getElementById("graph0"));
+            // Graph0.calculateSmoothGrapthLookup(64);
+            // 576 584
+            var ml = new WebML({Float16:false,wordEmbedingDims:256});
+            var Models = [
+                ml.CreateLayers([
+                    {TimedIndexStamp:true,vertical:true},
+                    {MultiHeadedSelfAttention:true,heads:8,queryKeyDims:256,valueDims:256,mask:true},
+                    {Dense:true,ActivationFunction:"relu",outputs:2048},
+                    {Dense:true,ActivationFunction:"relu",outputs:2048},
+                    {Dense:true,ActivationFunction:"linear",outputs:256},
+                    {Normalize:true},
+                    {MultiHeadedRecurrentAttention:true,heads:8,queryKeyDims:256,valueDims:256,recurrency:0.25},
+                    {MultiHeadedSelfAttention:true,heads:8,queryKeyDims:256,valueDims:256,mask:true},
+                    {Dense:true,ActivationFunction:"relu",outputs:2048},
+                    {Dense:true,ActivationFunction:"relu",outputs:2048},
+                    {Dense:true,ActivationFunction:"linear",outputs:256},
+                    {MultiHeadedRecurrentAttention:true,heads:8,queryKeyDims:256,valueDims:256,recurrency:0.25},
+                    {Dense:true,ActivationFunction:"linear",outputs:256},
+                ],[256,10,1])
+            ];
+            // {FRU:true,Falloff:0.5,stateOutputs:144,outputs:144},
+            var Input = new ml.Value([256,10,3]);
+            
+            // var Input = new Kai.ML.Value([4,1,1]);
+            // Input.set(new Float32Array(4).map(Kai.ML.randn));
+
+            var Grad = new ml.Value([144,1,1]);
+            function numberToCommaString(val) {
+                val = val.toString();
+                for (var i=3; i<val.length; i+=4) {
+					val = val.slice(0,val.length-i)+","+val.slice(-i);
+				}
+                return val;
+            }
+            var ModelNames = [
+                "MHRAU-0",
+            ];
+            for (var i=0; i<Models.length; i++) {
+                console.log(ModelNames[i]+":"+numberToCommaString(Models[i].ParameterCount));
+            }
+            // var LearningRate = 0.05;
+            // var LearningRate = 0.0001;
+            var LearningRate = 0.001;
+            var FileEle = document.getElementById("text");
+            var FileEle2 = document.getElementById("vocab");
+            FileEle2.onchange = function(e) {
+                var file = e.target.files[0];
+                var fr = new FileReader();
+                fr.onload = function() {
+                    var words = fr.result.split("\n");
+                    for (var i=0; i<256; i++) {
+                        words.unshift(String.fromCharCode(i));
+                    }
+                    ml.initalizeTokensAndEmbeddings(words,2);
+                }
+                fr.readAsText(file);
+            }
+            var textData = "";
+            FileEle.onchange = function(e) {
+                var file = e.target.files[0];
+                var fr = new FileReader();
+                fr.onload = function() {
+                    textData = ml.textToFlattenedArray(fr.result).slice(0,256*49);
+                    loop = setInterval(function(){
+                        var ls = [];
+                        for (var j=0; j<Models.length; j++) {
+                            var loss = 0;
+                            if (j < -1) {
+                                Input.setSize([256,Math.floor(textData.length/256)+1,1]);
+                                var InpV = new Float32Array(textData.length+256);
+                                InpV.set(textData,256);
+                                Input.set(InpV);
+                                var result = Models[j].call(Input);
+                                var resultData = result.toArray(1);
+                                var g = new Float32Array(resultData.length);
+                                for (var i=0; i<resultData.length; i++) {
+                                    g[i] = (textData[i] || 0)-resultData[i];
+                                    loss += g[i]*g[i];
+                                }
+                                Grad.setSize(result.size);
+                                Grad.set(g);
+                                Models[j].backprop(Grad);
+                                loss /= resultData.length;
+                                ls.push(loss);
+                                Models[j].finnishBatch(LearningRate/resultData.length);
+                            } else {
+                                var s = 0;
+                                for (var k=0; k<5; k++) {
+                                    Input.setSize([256,5,1]);
+                                    var InpV = new Float32Array(1280);
+                                    InpV.set(textData.subarray((k*1280)-(k == 0 ? 256 : 0),(k+1)*1280),k == 0 ? 256 : 0);
+                                    Input.set(InpV);
+                                    var result = Models[j].call(Input);
+                                    var resultData = result.toArray(1);
+                                    var g = new Float32Array(resultData.length);
+                                    for (var i=0; i<resultData.length; i++) {
+                                        g[i] = (textData[i+(k*1280)] || 0)-resultData[i];
+                                        loss += g[i]*g[i];
+                                    }
+                                    Grad.setSize(result.size);
+                                    Grad.set(g);
+                                    Models[j].backprop(Grad);
+                                    s += resultData.length;
+                                }
+                                loss /= s;
+                                ls.push(loss);
+                                Models[j].reset();
+                                Models[j].finnishBatch(LearningRate/resultData.length);
+                            }
+                        }
+                        // Kai.Layers.Vision.finnishBatch(LearningRate);
+                        // Kai.reset();
+                        // console.log(loss);
+                        // lsdiv.innerText = loss.toString();
+                        // Graph0.addValueAndGrapth(1-(loss*0.5));
+                        console.log(ls);
+                        losses.push(ls);
+                        Iteration++;
+                        if (Iteration > 1000) {
+                            clearInterval(loop);
+                        }
+                    },0);
+                }
+                fr.readAsText(file);
+            }
+            var Iteration = 0;
+            var losses = [];
+            var loop;
+        </script>
+    </body>
+</html>
